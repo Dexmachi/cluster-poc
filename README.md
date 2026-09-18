@@ -80,11 +80,25 @@ Adotamos o padrão **Multi-Party Encryption (Shamir Secret Sharing com Threshold
 | **`base/`** | `base/.*\.yaml` | **Apenas Age** | Resolver o problema do bootstrap ("galinha e o ovo") para subir Traefik e OpenBao. |
 | **`security/` & `apps/`** | `(security\|apps)/.*\.yaml` | **Age + OpenBao Transit Key** (`shamir_threshold: 2`) | Exigir autorização centralizada do OpenBao em tempo real + chave Age para qualquer secret de aplicação. |
 
+### Modelo de Chaves Age Utilizadas:
+
+O cluster utiliza duas chaves Age em conjunto, ambas com sistema post-quantum:
+
+1. **Chave 1 (Operacional / Cluster):**
+   * **Chave Pública:** `age1pq1fm96eas2guseckhkr9z0cwqs62szyfa...`
+   * **Uso:** Utilizada pelo Flux CD dentro do cluster (armazenada no secret `sops-age` / `sops-security`).
+   * **Propósito:** Automação contínua e reconciliação diária do GitOps.
+
+2. **Chave 2 (Offline / Break-Glass / Out-of-Band):**
+   * **Chave Pública:** `age1pq18wvpuzf4ng4cpyykvjypanzusm5u9s...`
+   * **Uso:** Chave de emergência mantida **fora do cluster** (ex: cold storage, cofre offline, YubiKey).
+   * **Propósito:** Recuperação de desastres (*Disaster Recovery*). Caso o OpenBao seja corrompido ou fique inacessível, um operador de segurança pode utilizar esta chave para decriptar qualquer arquivo do Git manualmente de forma independente (*Out-Of-Band*), sem depender do OpenBao online.
+
 ### Como o Flux decripta os segredos:
 1. O segredo `sops-security` no namespace `flux-system` contém:
-   * `age.agekey`: Chave privada do Age. (apenas no secret sops-age)
-   * `VAULT_ADDR`: Endereço do OpenBao.
-   * `VAULT_TOKEN`: Token de autenticação com política para `transit/decrypt/sops-key`.
+   * `age.agekey`: Chave privada da Chave Operacional do Age (também no secret `sops-age`).
+   * `VAULT_ADDR`: Endereço do OpenBao (`http://10.0.0.134:30200` ou interno).
+   * `VAULT_TOKEN`: Token gerado pelo CronJob via `auth/kubernetes`.
 2. As variáveis de ambiente `VAULT_ADDR` e `VAULT_TOKEN` são carregadas no `kustomize-controller`.
 3. Ao sincronizar o Git, o Flux decripta os manifestos `.yaml` em memória e aplica os recursos normais no cluster.
 
