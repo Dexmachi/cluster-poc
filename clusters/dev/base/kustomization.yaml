@@ -8,6 +8,7 @@ resources:
   - traefik/cluster-issuer.yaml
   - traefik/ir.yaml
   - traefik/middleware.yaml
+  - traefik/dashboard-auth.yaml
   - cert-manager/release.yaml
   - cert-manager/repo.yaml
   - openbao/repo.yaml
