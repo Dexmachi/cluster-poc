@@ -262,6 +262,7 @@ Antes de tudo, você precisa ter uma chave Age gerada na sua máquina e configur
      key_groups:
      - age:
        - "<SUA_CHAVE_PUBLICA_AGE>"
+       - "<SUA_CHAVE_PUBLICA_AGE2>"
 
    # 2. Segurança e Aplicações (Age + OpenBao Transit)
    - path_regex: (security|apps)/.*\.ya?ml
@@ -272,6 +273,8 @@ Antes de tudo, você precisa ter uma chave Age gerada na sua máquina e configur
        - "<SUA_CHAVE_PUBLICA_AGE>"
      - hc_vault:
        - "http://<IP_DO_SEU_NO>:30200/v1/transit/keys/sops-key"
+     - age:
+       - "<SUA_CHAVE_PUBLICA_AGE2>"
    ```
 
 ### Passo 1: Instalar o Flux CD no Cluster
