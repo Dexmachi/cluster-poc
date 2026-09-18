@@ -4,7 +4,7 @@ metadata:
   name: openbao-sops-token-rotator
   namespace: flux-system
 spec:
-  schedule: "0 */12 * * *" # Executa a cada 12 horas
+  schedule: "0 */12 * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 2
   jobTemplate:
