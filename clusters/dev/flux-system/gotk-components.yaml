@@ -3527,6 +3527,10 @@ spec:
         - --log-level=info
         - --log-encoding=json
         - --enable-leader-election
+        envFrom:
+        - secretRef:
+            name: sops-security
+            optional: true
         env:
         - name: RUNTIME_NAMESPACE
           valueFrom:
