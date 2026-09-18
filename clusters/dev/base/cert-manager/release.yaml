@@ -5,6 +5,7 @@ metadata:
   name: cert-manager
   namespace: flux-system
 spec:
+  targetNamespace: cert-manager
   interval: 15m
   chart:
     spec:
@@ -13,7 +14,7 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: jetstack
-        namespace: cert-manager
+        namespace: flux-system
   install:
     createNamespace: true
   values:
