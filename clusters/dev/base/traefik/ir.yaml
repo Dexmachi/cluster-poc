@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`traefik.seu-dominio.com`)
+    - match: Host(`traefik.lappis.rocks`)
       kind: Rule
       services:
         - name: api@internal
