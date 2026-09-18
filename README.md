@@ -164,7 +164,7 @@ flux reconcile kustomization security --with-source
 
 ---
 
-## 🚀 6. Como Expandir o Cluster
+## 6. Como Expandir o Cluster
 
 ### Adicionando uma Nova Camada (ex: `apps/`)
 
