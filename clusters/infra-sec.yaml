@@ -1,0 +1,16 @@
+# declaração de onde vão as partes de segurança do cluster pro fluxcd
+
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: security
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/dev/security
+  prune: true
+  dependsOn:
+    - name: infra-base
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
