@@ -3,6 +3,8 @@ kind: Kustomization
 resources:
   - gotk-components.yaml
   - gotk-sync.yaml
+  - infra-base.yaml
+  - infra-sec.yaml
 patches:
   - patch: |
       apiVersion: apps/v1
