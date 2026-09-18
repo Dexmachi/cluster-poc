@@ -3,10 +3,9 @@ kind: IngressRoute
 metadata:
   name: traefik-dashboard
   namespace: traefik
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   entryPoints:
+    - web
     - websecure
   routes:
     - match: Host(`traefik.lappis.rocks`)

@@ -27,12 +27,7 @@ spec:
         publishedService:
           enabled: true
     ports:
-      web:
-        http:
-          redirections:
-            entryPoint:
-              to: websecure
-              scheme: https
+      web: {}
       websecure:
         http:
           tls:
