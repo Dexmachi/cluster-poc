@@ -248,7 +248,7 @@ Antes de tudo, você precisa ter uma chave Age gerada na sua máquina e configur
 1. **Gerar o par de chaves Age:**
    ```bash
    mkdir -p ~/.config/sops/age
-   age-keygen -o ~/.config/sops/age/keys.txt
+   age-keygen -pq -o ~/.config/sops/age/keys.txt
 
    age-keygen -y ~/.config/sops/age/keys.txt
    ```
