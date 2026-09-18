@@ -1,4 +1,4 @@
-# release declara os values do helm básicamente
+# release declara os values do helm básicamente.
 
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
