@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-sops-token-rotator
+  namespace: flux-system
+spec:
+  schedule: "0 */12 * * *" # Executa a cada 12 horas
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: kustomize-controller
+          restartPolicy: OnFailure
+          containers:
+            - name: rotator
+              image: curlimages/curl:8.7.1
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "==> Lendo JWT da ServiceAccount do Kustomize Controller..."
+                  K8S_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+                  echo "==> Solicitando token de curta duração ao OpenBao..."
+                  LOGIN_PAYLOAD=$(printf '{"jwt": "%s", "role": "sops-kustomize"}' "$K8S_TOKEN")
+
+                  RESPONSE=$(curl -s -X POST \
+                    -H "Content-Type: application/json" \
+                    -d "$LOGIN_PAYLOAD" \
+                    http://openbao.openbao.svc.cluster.local:8200/v1/auth/kubernetes/login)
+
+                  NEW_VAULT_TOKEN=$(echo "$RESPONSE" | grep -o '"client_token":"[^"]*' | cut -d'"' -f4)
+
+                  if [ -z "$NEW_VAULT_TOKEN" ]; then
+                    echo "ERRO: Falha ao autenticar no OpenBao!"
+                    echo "$RESPONSE"
+                    exit 1
+                  fi
+
+                  echo "==> Token gerado com sucesso! Atualizando o secret sops-security..."
+                  # Atualiza apenas o VAULT_TOKEN via API do Kubernetes
+                  curl -s -k -X PATCH \
+                    -H "Authorization: Bearer $K8S_TOKEN" \
+                    -H "Content-Type: application/strategic-merge-patch+json" \
+                    -d "{\"stringData\": {\"VAULT_TOKEN\": \"$NEW_VAULT_TOKEN\"}}" \
+                    https://kubernetes.default.svc/api/v1/namespaces/flux-system/secrets/sops-security
+
+                  echo "==> Rotação de token concluída com sucesso!"

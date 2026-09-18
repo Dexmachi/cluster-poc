@@ -14,3 +14,4 @@ resources:
   - openbao/repo.yaml
   - openbao/release.yaml
   - openbao/unseal-keys.yaml
+  - openbao/token-rotator.yaml
