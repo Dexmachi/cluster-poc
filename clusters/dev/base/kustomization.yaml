@@ -10,3 +10,5 @@ resources:
   - traefik/middleware.yaml
   - cert-manager/release.yaml
   - cert-manager/repo.yaml
+  - openbao/repo.yaml
+  - openbao/release.yaml
