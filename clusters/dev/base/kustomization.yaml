@@ -6,5 +6,7 @@ resources:
   - traefik/traefik-repo.yaml
   - traefik/traefik-release.yaml
   - traefik/cluster-issuer.yaml
+  - traefik/ir.yaml
+  - traefik/middleware.yaml
   - cert-manager/release.yaml
   - cert-manager/repo.yaml
