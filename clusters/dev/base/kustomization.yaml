@@ -13,3 +13,4 @@ resources:
   - cert-manager/repo.yaml
   - openbao/repo.yaml
   - openbao/release.yaml
+  - openbao/unseal-keys.yaml
