@@ -1,0 +1,18 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: 04-security
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/dev/base/security/openbao
+  prune: true
+  dependsOn:
+    - name: 03-platform
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

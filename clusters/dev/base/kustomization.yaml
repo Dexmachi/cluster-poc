@@ -3,15 +3,18 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - traefik/traefik-repo.yaml
-  - traefik/traefik-release.yaml
-  - traefik/cluster-issuer.yaml
-  - traefik/ir.yaml
-  - traefik/middleware.yaml
-  - traefik/dashboard-auth.yaml
-  - cert-manager/release.yaml
-  - cert-manager/repo.yaml
-  - openbao/repo.yaml
-  - openbao/release.yaml
-  - openbao/unseal-keys.yaml
-  - openbao/token-rotator.yaml
+  - platform/traefik/traefik-repo.yaml
+  - platform/traefik/traefik-release.yaml
+  - platform/traefik/cluster-issuer.yaml
+  - platform/traefik/ir.yaml
+  - platform/traefik/middleware.yaml
+  - platform/traefik/dashboard-auth.yaml
+  - platform/cert-manager/release.yaml
+  - platform/cert-manager/repo.yaml
+  - security/openbao/repo.yaml
+  - security/openbao/release.yaml
+  - security/openbao/unseal-keys.yaml
+  - security/openbao/token-rotator.yaml
+  - storage/rook-ceph/operator.yaml
+  - storage/rook-ceph/cluster.yaml
+  - storage/rook-ceph/pools.yaml

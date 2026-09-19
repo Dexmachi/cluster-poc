@@ -1,14 +1,14 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: security
+  name: 03-platform
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./clusters/dev/security
+  path: ./clusters/dev/base/platform/traefik
   prune: true
   dependsOn:
-    - name: infra-base
+    - name: 02-storage
   sourceRef:
     kind: GitRepository
     name: flux-system
