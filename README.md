@@ -1,369 +1,300 @@
-# Cluster — GitOps Architecture
+# Ch-aOS Cluster — Enterprise GitOps & Cloud-Native Architecture
 
-Este repositório contém a infraestrutura e configuração do cluster Kubernetes gerenciado via **GitOps (Flux CD v2)**, com controle de ingress através do **Traefik**, gerenciamento centralizado de chaves com **OpenBao (Transit Secrets Engine)** e criptografia declarativa no Git com **SOPS + Age + OpenBao TKs**.
-
+Este repositório contém a infraestrutura como código (IaC) e a configuração declarativa do cluster Kubernetes gerenciado via **GitOps (Flux CD v2)**. 
 ---
 
-## 1. Arquitetura Geral
+## 1. Visão Geral da Arquitetura
+
+O ecossistema opera em um pipeline estritamente ordenado por fases de dependência (`01` a `05`), garantindo que serviços fundamentais de governança e armazenamento estejam prontos antes de serviços de plataforma, segurança e aplicações.
 
 ```mermaid
 flowchart TD
-    subgraph GitOps [Repositório Git]
-        RepoGit[(GitLab / GitHub)]
-        BaseLayer["clusters/dev/base/\n(Traefik, Cert-Manager, OpenBao)\n[Criptografia: Apenas Age]"]
-        SecLayer["clusters/dev/security/\n(Secrets críticos, RBAC, etc.)\n[Criptografia: Age + OpenBao Transit]"]
-        AppsLayer["clusters/dev/apps/\n(Workloads, APIs, Bancos)\n[Criptografia: Age + OpenBao Transit]"]
-        RepoGit --> BaseLayer
-        RepoGit --> SecLayer
-        RepoGit --> AppsLayer
+    subgraph GitOps [Repositório Git & Flux CD v2]
+        GitRepo[(GitLab / GitHub)]
+        KustomizeCtrl[Flux kustomize-controller\nDecriptação SOPS em memória]
+        GitRepo --> KustomizeCtrl
     end
 
-    subgraph FluxCD [Flux CD v2 - flux-system]
-        SourceCtrl[source-controller\nSincroniza Git]
-        KustomizeCtrl[kustomize-controller\nDecripta SOPS em memória e Aplica]
-        SourceCtrl --> KustomizeCtrl
+    subgraph Phase01 [Fase 01: Governança]
+        CertMgr[Cert-Manager]
+        Kyverno[Kyverno Policy Engine]
+        Policies[Políticas de Camadas & Auto-Onboarding]
     end
 
-    subgraph ClusterK8s [Kubernetes Cluster]
-        OpenBaoPod["OpenBao (Transit Engine)\nChave: sops-key\nNodePort: 30200"]
-        TraefikPod["Traefik Ingress\nNodePort: 31972 (HTTP) / 32199 (HTTPS)"]
-        Workloads["Aplicações & Secrets em Texto Claro"]
+    subgraph Phase02 [Fase 02: Storage Distribuído]
+        RookOp[Rook-Ceph Operator]
+        CephCluster[Ceph Cluster - Squid v19.2]
+        RBD[Ceph Block Pool - RWO / ceph-block]
+        RGW[Ceph Object Store - S3 / ceph-bucket]
     end
 
-    subgraph Edge [Borda & Acesso Externo]
-        NPM[Nginx Proxy Manager\nTerminação SSL / *.lappis.rocks]
+    subgraph Access [Acesso Seguro & Auditoria - Out-of-Band]
+        Teleport["Teleport Zero-Trust Access\n(Provisionado Externamente)\nSSH Nós + Kube API Access"]
     end
 
-    RepoGit -->|Poll Git| SourceCtrl
-    KustomizeCtrl -->|Aplica Base| TraefikPod
-    KustomizeCtrl -->|Aplica Base| OpenBaoPod
-    KustomizeCtrl -.->|Autentica via VAULT_TOKEN| OpenBaoPod
-    KustomizeCtrl -->|Aplica Security & Apps| Workloads
-    NPM -->|Encaminha tráfego NodePort:31972| TraefikPod
-    TraefikPod --> Workloads
+    subgraph Edge [Borda & Roteamento]
+        Traefik[Traefik Ingress Controller]
+        Issuers[ClusterIssuers TLS]
+    end
+
+    subgraph Phase04 [Fase 04: Segurança & Backup]
+        OpenBao[OpenBao - Transit Secrets Engine]
+        Rotator[Kubernetes SA Token Rotator]
+        Velero[Velero Backup & DR]
+    end
+
+    subgraph Phase05 [Fase 05: Aplicações & Workloads]
+        Apps[Exemplo: Apps / Workloads]
+        OBC[ObjectBucketClaims]
+        PVC[PersistentVolumeClaims]
+    end
+
+    KustomizeCtrl -->|01-governance| Phase01
+    Phase01 -->|01-governance-policies| Policies
+    Policies -->|02-storage-operator| RookOp
+    RookOp -->|02-storage-cluster| CephCluster
+    CephCluster --> RBD & RGW
+    Phase02 -->|03-platform| Edge
+    Edge -->|04-security| Phase04
+    RBD -.->|PVC RBD 5Gi| OpenBao
+    RGW -.->|Bucket S3| Velero
+    Phase04 -->|05-apps| Phase05
+    RBD -.-> PVC
+    RGW -.-> OBC
+    Traefik -.->|IngressRoute| Apps
+    Teleport -.->|Acesso Seguro & Auditado| GitOps & ClusterK8s
 ```
 
 ---
 
-## 2. Estrutura de Diretórios
+## 2. As 5 Fases do Pipeline GitOps
+
+| Fase | Kustomization Flux | Caminho | Componentes | Responsabilidade |
+| :--- | :--- | :--- | :--- | :--- |
+| **01** | `01-governance`<br>`01-governance-policies` | `clusters/dev/base/platform/governance` | **Cert-Manager**, **Kyverno** | Emissão de certificados, validação de regras semânticas de camadas, criação automática de NetworkPolicies e ResourceQuotas ao criar namespaces. |
+| **02** | `02-storage-operator`<br>`02-storage-cluster` | `clusters/dev/base/storage/rook-ceph-*` | **Rook-Ceph** (Squid v19.2.0) | Armazenamento distribuído unificado: CSI Block (`ceph-block`) para bancos/PVCs e Object Store S3 (`ceph-bucket` via OBC). |
+| **03** | `03-platform` | `clusters/dev/base/platform/traefik` | **Traefik Proxy**, ClusterIssuers | Ingress Controller, roteamento HTTP/HTTPS L7 via `IngressRoute`, terminação TLS e integração com borda. |
+| **04** | `04-security` | `clusters/dev/base/security` | **OpenBao**, **Velero** | Cofre com Transit Engine para descriptografia SOPS, renovador dinâmico de tokens via SA e backup/restore do cluster para bucket Ceph S3. |
+| **05** | `05-apps` | `clusters/dev/apps` | Templates e Workloads | Aplicações de negócio com segregação de rede automática, PVCs em Ceph Block e buckets S3 dedicados via OBC. |
+
+---
+
+## 3. Requisitos de Hardware e Dependências de Sistema
+
+### A. Requisitos de Hardware
+
+#### 1. Ambiente de Desenvolvimento / Lab (Single-Node ou Compacto)
+* **CPU:** Mínimo 4 vCPUs (Recomendado: 8 vCPUs).
+* **Memória RAM:** Mínimo 8 GB (Recomendado: 16 GB).
+* **Armazenamento:**
+  * 1 disco para o Sistema Operacional / K8s (`/dev/sda` ou `/`).
+  * 1 disco ou partição bruta dedicada sem formatação (Raw Block Device, ex: `/dev/sdb`, `/dev/nvme0n1` ou diretório) para os OSDs do Ceph (mínimo 50 GB).
+
+#### 2. Ambiente de Produção / Bare-Metal Enterprise (Multi-Node HA - Ex: Huawei / On-Premise)
+* **Topologia:** Mínimo de 3 nós Control-Plane/Worker/Etcd (para quórum de Ceph MON e réplica tripla de dados).
+* **CPU por Nó Worker:** 8 a 16+ Cores.
+* **Memória RAM por Nó Worker:** Mínimo 32 GB (Recomendado: 64 GB+).
+* **Armazenamento por Nó:**
+  * 1x Discos em RAID 1 para SO (Linux).
+  * 1x Disco externo NVMe / SSD / HDD para OSDs do Ceph.
+
+---
+
+### B. Dependências de Sistema Operacional e Kernel
+
+* **Sistema Operacional:** Debian 12 ou 13.
+* **Kernel:** Linux Kernel 5.15+ (Recomendado 6.x).
+* **Container Runtime:** `containerd` (v1.7+) ou `CRI-O` com systemd cgroup driver.
+* **Kubernetes RKE2:** Versão `v1.35.x>=`.
+
+---
+
+## 4. Estrutura do Repositório
 
 ```text
 .
 ├── README.md
 └── clusters/
     └── dev/
-        ├── .sops.yaml              # Regras de encriptação SOPS (Age vs OpenBao)
-        ├── flux-system/            # Camada de controle do Flux CD
-        │   ├── gotk-components.yaml# Manifestos dos controladores Flux
-        │   ├── gotk-sync.yaml      # Sincronização raiz do repositório
-        │   ├── infra-base.yaml     # Kustomization para o 'base/' (Age)
-        │   ├── infra-sec.yaml      # Kustomization para o 'security/' (Age + OpenBao)
-        │   └── kustomization.yaml  # Orquestração do flux-system
-        ├── base/                   # Camada de infraestrutura fundamental (Bootstrap)
-        │   ├── kustomization.yaml
-        │   ├── traefik/            # Ingress Controller (CRDs, HelmRelease, IngressRoute)
-        │   ├── cert-manager/       # Emissor de certificados
-        │   └── openbao/            # Vault / Transit Secrets Engine
-        └── security/               # Camada de segurança e segredos protegidos
-            ├── kustomization.yaml
-            └── secret1.yaml        # Exemplo de segredo multi-chave
+        ├── .sops.yaml                        # Regras de encriptação SOPS (Age vs OpenBao)
+        ├── flux-system/                      # Orquestração mestre do Flux CD (5 Fases)
+        │   ├── gotk-components.yaml          # Controladores do Flux
+        │   ├── gotk-sync.yaml                # Sincronização do repositório Git
+        │   ├── 01-governance.yaml            # Fase 1: Cert-Manager & Kyverno
+        │   ├── 01-governance-policies.yaml   # Fase 1: Políticas de Camadas
+        │   ├── 02-storage-operator.yaml      # Fase 2: Rook-Ceph Operator
+        │   ├── 02-storage-cluster.yaml       # Fase 2: Ceph Cluster, Block & S3 Pools
+        │   ├── 03-platform.yaml              # Fase 3: Traefik Ingress & TLS
+        │   ├── 04-security.yaml              # Fase 4: OpenBao & Velero
+        │   ├── 05-apps.yaml                  # Fase 5: Workloads e Aplicações
+        │   └── kustomization.yaml
+        ├── base/
+        │   ├── platform/
+        │   │   ├── governance/               # Cert-Manager, Kyverno & Policies
+        │   │   └── traefik/                  # Traefik Controller & IngressRoutes
+        │   ├── storage/
+        │   │   ├── rook-ceph-operator/       # HelmRelease do Rook Operator
+        │   │   └── rook-ceph-cluster/        # CephCluster CR, StorageClasses & OBC
+        │   └── security/
+        │       ├── openbao/                  # OpenBao Transit, SA Auth & Rotator
+        │       └── velero/                   # Velero DR com backend Ceph RGW S3
+        └── apps/                             # Templates de Aplicações
+            └── example-app/                  # App demonstrativo com OBC e Traefik
 ```
 
 ---
 
-## 3. Estratégia de Secrets (SOPS + Age + OpenBao Transit)
+## 5. Como o Sistema Funciona em Detalhes
 
-Adotamos o padrão **Multi-Party Encryption (Shamir Secret Sharing com Threshold 2)** para garantir que os segredos fiquem versionados com segurança máxima no Git:
+### A. Governança e Isolamento com Kyverno
+1. **Semantic Layers Enforcement:** Impede que pods de camadas públicas/base se comuniquem diretamente com bancos ou secrets de aplicações sem passar pelas camadas autorizadas.
+2. **Auto Namespace Onboarding:** Ao criar qualquer novo namespace, o Kyverno injeta automaticamente:
+   * `NetworkPolicy` com isolamento padrão (`default-isolation`).
+   * `ResourceQuota` com limites padrão de CPU e Memória para evitar starvation do nó.
 
-| Camada | Regra `.sops.yaml` | Chaves Necessárias | Propósito |
-| :--- | :--- | :--- | :--- |
-| **`base/`** | `base/.*\.yaml` | **Apenas Age** | Resolver o problema do bootstrap ("galinha e o ovo") para subir Traefik e OpenBao. |
-| **`security/` & `apps/`** | `(security\|apps)/.*\.yaml` | **Age + OpenBao Transit Key** (`shamir_threshold: 2`) | Exigir autorização centralizada do OpenBao em tempo real + chave Age para qualquer secret de aplicação. |
+### B. Storage Unificado com Rook-Ceph
+* **Block Storage (`ceph-block`):** RWO provisionado via RBD. Utilizado pelo OpenBao e bancos de dados.
+* **Object Storage S3 (`ceph-bucket`):** Criação de buckets e credenciais declarativas via `ObjectBucketClaim` (OBC).
+* O endpoint interno do S3 fica disponível no cluster em `http://rook-ceph-rgw-ceph-s3.rook-ceph.svc:80`.
 
-### Modelo de Chaves Age Utilizadas:
+### C. Segurança Zero-Trust com SOPS + Shamir Secret Sharing
+Utilizamos criptografia multi-partes no Git (`shamir_threshold: 2`):
 
-O cluster utiliza duas chaves Age em conjunto, ambas com sistema post-quantum:
+```mermaid
+flowchart LR
+    GitFile[Manifesto Criptografado no Git]
+    AgeKey[Chave Age PQ Operacional]
+    BaoKey[OpenBao Transit Engine\nsops-key]
+    ClearSecret[Manifesto em Texto Claro\nAplicado na Memória do K8s]
 
-1. **Chave 1 (Operacional / Cluster):**
-   * **Chave Pública:** `age1pq1fm96eas2guseckhkr9z0cwqs62szyfa...`
-   * **Uso:** Utilizada pelo Flux CD dentro do cluster (armazenada no secret `sops-age` / `sops-security`).
-   * **Propósito:** Automação contínua e reconciliação diária do GitOps.
+    GitFile -->|Fator 1: Secret sops-age| AgeKey
+    GitFile -->|Fator 2: Token Dinâmico| BaoKey
+    AgeKey & BaoKey -->|Quórum 2 de 2 Atendido| ClearSecret
+```
 
-2. **Chave 2 (Offline / Break-Glass / Out-of-Band):**
-   * **Chave Pública:** `age1pq18wvpuzf4ng4cpyykvjypanzusm5u9s...`
-   * **Uso:** Chave de emergência mantida **fora do cluster** (ex: cold storage, cofre offline, YubiKey).
-   * **Propósito:** Recuperação de desastres (*Disaster Recovery*). Caso o OpenBao seja corrompido ou fique inacessível, um operador de segurança pode utilizar esta chave para decriptar qualquer arquivo do Git manualmente de forma independente (*Out-Of-Band*), sem depender do OpenBao online.
+* **Chave Age (Operacional / Cluster):** Injetada no secret `sops-age` do Flux.
+* **Chave Age (Break-Glass / Disaster Recovery):** Mantida offline (cold storage) para decriptação de emergência sem o OpenBao.
+* **OpenBao Transit Engine:** O `kustomize-controller` do Flux obtém tokens de curta duração via ServiceAccount Kubernetes para decriptar os manifestos durante o reconciliamento.
 
-### Como o Flux decripta os segredos:
-1. O segredo `sops-security` no namespace `flux-system` contém:
-   * `age.agekey`: Chave privada da Chave Operacional do Age (também no secret `sops-age`).
-   * `VAULT_ADDR`: Endereço do OpenBao (`http://10.0.0.134:30200` ou interno).
-   * `VAULT_TOKEN`: Token gerado pelo CronJob via `auth/kubernetes`.
-2. As variáveis de ambiente `VAULT_ADDR` e `VAULT_TOKEN` são carregadas no `kustomize-controller`.
-3. Ao sincronizar o Git, o Flux decripta os manifestos `.yaml` em memória e aplica os recursos normais no cluster.
+### D. Backup e Disaster Recovery com Velero
+* **Engine:** Velero integrado ao plugin AWS S3 (`velero-plugin-for-aws`).
+* **Destino:** Bucket S3 provisionado dinamicamente pelo Rook-Ceph (`velero-backups`).
+* **Snapshots CSI:** Habilitado via `features: EnableCSI` para tirar snapshots de volumes RBD Ceph.
+* **Rotina:** Backup diário automático às 03:00 AM com retenção configurável de 30 dias.
+
+### E. Acesso Seguro, Identidade e Auditoria com Teleport (Out-of-Band)
+* **Zero-Trust Access:** O Teleport gerencia o acesso centralizado e auditado para sessões SSH nos nós bare-metal e conexões autenticadas à API do Kubernetes e via HTTPS, tirando a dependência de VPNs para gerenciar o cluster (`tsh login`, `tsh kube login`).
+* **Arquitetura Out-of-Band (Externo ao Cluster):**
+  * O plano de controle do Teleport (*Auth & Proxy Service*) é provisionado **fora do cluster Kubernetes** (em infraestrutura/VM isolada ou serviço gerenciado dedicado).
+  * **Decisão de Resiliência:** Manter o Teleport desacoplado do ciclo de vida do cluster garante acesso *Break-Glass*. Mesmo em caso de pane catastrófica no Kubernetes, falhas de CNI ou indisponibilidade do Traefik, os operadores e mantenedores conseguem acessar com segurança os nós bare-metal para diagnóstico e restauração.
+  * **Conexão com o Cluster:** O cluster se comunica com o Teleport via agente reverso (`teleport-kube-agent` / kubeconfig) em conexão puramente de saída (*outbound-only*), eliminando a necessidade de expor portas de gerenciamento ou túneis SSH tradicionais para a internet.
 
 ---
 
-## 4. Arquitetura de Ingress & Roteamento
+## 6. Guia Operacional do Dia a Dia
 
-Como o cluster opera em ambiente de desenvolvimento atrás de um **Nginx Proxy Manager (NPM)** externo:
-
-1. **NPM (Temporário para poc):**
-   * Recebe o tráfego da internet (ex: `traefik.lappis.rocks`, `openbao.lappis.rocks`, `app.lappis.rocks`).
-   * Cuida da terminação SSL (certificados Let's Encrypt públicos).
-   * Encaminha as requisições via HTTP para o IP do nó do cluster na porta NodePort do Traefik (**`31972`**).
-2. **Traefik (Cluster Ingress):**
-   * Escuta nos entryPoints `web` (80) e `websecure` (443).
-   * Roteia para os pods internos baseado em objetos `IngressRoute` ou `Ingress` padrão.
-
----
-
-## 5. Guia de Operação no Dia a Dia
-
-### A. Como Criar e Criptografar um Novo Secret
-
-1. Configure o ambiente no seu terminal:
+### Como criar e criptografar um novo Secret
+1. Configure seu terminal:
    ```bash
-   export VAULT_ADDR="http://<IP_DO_NO>:30200"
+   export VAULT_ADDR="http://<IP_DO_CLUSTER>:30200"
    vault login
    ```
 
-2. Crie o arquivo YAML com o Secret em texto claro (ex: `clusters/dev/apps/meu-app/secret.yaml`):
+2. Crie o arquivo do segredo (ex: `clusters/dev/apps/meu-app/secret.yaml`) e criptografe:
+   ```bash
+   sops --config clusters/dev/.sops.yaml encrypt --in-place clusters/dev/apps/meu-app/secret.yaml
+   ```
+
+3. Comite no Git e sincronize com o Flux:
+   ```bash
+   git add clusters/dev/apps/
+   git commit -m "feat: add secure secret"
+   git push origin main
+   flux reconcile kustomization 05-apps --with-source
+   ```
+
+### Como disparar um backup manual com Velero
+```bash
+# 1. Criar backup de um namespace específico
+velero backup create backup-manual-app --include-namespaces=example-app --wait
+
+# 2. Inspecionar o status do backup
+velero backup describe backup-manual-app
+
+# 3. Listar backups disponíveis no Ceph S3
+velero backup get
+```
+
+### Como verificar a saúde do Storage Ceph
+```bash
+kubectl get cephcluster -n rook-ceph
+kubectl get cephblockpool,cephobjectstore -n rook-ceph
+kubectl get obc -A
+```
+
+---
+
+## 7. Procedimento de Bootstrap (Do Zero)
+
+Caso precise subir este cluster do zero em um ambiente novo:
+
+1. **Bootstrap do Flux:**
+   ```bash
+   flux bootstrap git \
+     --url=ssh://git@github.com/SEU-USER/chaos-cluster.git \
+     --branch=main \
+     --path=clusters/dev/flux-system
+   ```
+
+2. **Injetar a Chave Age do SOPS:**
+   ```bash
+   cat ~/.config/sops/age/keys.txt | kubectl create secret generic sops-age \
+     -n flux-system \
+     --from-file=age.agekey=/dev/stdin
+   ```
+
+3. **Acompanhar a orquestração automática das fases:**
+   ```bash
+   flux get kustomizations -w
+   ```
+
+4. **Inicializar e Destravar (Unseal) o OpenBao (após Fase 04):**
+   ```bash
+   kubectl exec -it openbao-0 -n openbao -- bao operator init
+   # Guarde as 5 Unseal Keys e o Initial Root Token retornados!
+
+   # Destravar o cofre (mínimo de 3 chaves - Shamir 3-of-5 padrão do operador):
+   kubectl exec -it openbao-0 -n openbao -- bao operator unseal <KEY_1>
+   kubectl exec -it openbao-0 -n openbao -- bao operator unseal <KEY_2>
+   kubectl exec -it openbao-0 -n openbao -- bao operator unseal <KEY_3>
+   ```
+
+5. **Persistir as Chaves com Segurança no Git (`unseal-keys.yaml`):**
+Para garantir rastreabilidade e permitir recuperação sem expor segredos em texto claro, salve o token e as chaves no secret `clusters/dev/base/security/openbao/unseal-keys.yaml` (isso é inseguro em ambientes de produção, mas aceitável em ambientes single cluster ou ambientes sem uma forma de fazer o auto unseal do OpenBao):
+
    ```yaml
    apiVersion: v1
    kind: Secret
    metadata:
-     name: meu-app-secret
-     namespace: default
+     name: unseal-keys
+     namespace: openbao
    type: Opaque
    stringData:
-     DB_PASSWORD: "minha-senha-super-secreta"
+     InitialToken: "<INITIAL_ROOT_TOKEN>"
+     Unseal1: "<UNSEAL_KEY_1>"
+     Unseal2: "<UNSEAL_KEY_2>"
+     Unseal3: "<UNSEAL_KEY_3>"
+     Unseal4: "<UNSEAL_KEY_4>"
+     Unseal5: "<UNSEAL_KEY_5>"
    ```
-
-3. Criptografe o arquivo:
+   Criptografe o arquivo com SOPS (utilizando a chave Age de bootstrap) e envie ao Git:
    ```bash
-   sops --encrypt --in-place clusters/dev/apps/meu-app/secret.yaml
+   sops --config clusters/dev/.sops.yaml encrypt --in-place clusters/dev/base/security/openbao/unseal-keys.yaml
+   git add clusters/dev/base/security/openbao/unseal-keys.yaml
+   git commit -m "chore(openbao): persist encrypted unseal keys and root token"
+   git push
    ```
 
-4. Adicione o arquivo no `kustomization.yaml` da pasta correspondente, comite e dê push:
-   ```bash
-   git add clusters/
-   git commit -m "feat(secret): add encrypted secret for meu-app"
-   git push origin main
-   ```
-
----
-
-### B. Como Editar um Secret Existente
-
-Para alterar valores de um segredo já criptografado no repositório:
-
-```bash
-# Abre o secret no seu $EDITOR, decripta temporariamente e re-criptografa ao salvar
-sops clusters/dev/security/secret1.yaml
-```
-
----
-
-### C. Como Forçar a Sincronização do Flux
-
-```bash
-# Sincronizar repositório Git e infraestrutura base
-flux reconcile kustomization flux-system --with-source
-flux reconcile kustomization infra-base --with-source
-
-# Sincronizar camada de segurança
-flux reconcile kustomization security --with-source
-```
-
----
-
-## 6. Como Expandir o Cluster
-
-### Adicionando uma Nova Camada (ex: `apps/`)
-
-1. **Crie a pasta da camada:**
-   ```bash
-   mkdir -p clusters/dev/apps
-   ```
-
-2. **Crie o Kustomization de orquestração em `clusters/dev/flux-system/infra-apps.yaml`:**
-   ```yaml
-   apiVersion: kustomize.toolkit.fluxcd.io/v1
-   kind: Kustomization
-   metadata:
-     name: apps
-     namespace: flux-system
-   spec:
-     interval: 10m
-     path: ./clusters/dev/apps
-     prune: true
-     dependsOn:
-       - name: security
-     sourceRef:
-       kind: GitRepository
-       name: flux-system
-     decryption:
-       provider: sops
-       secretRef:
-         name: sops-security
-   ```
-
-3. **Declare o novo manifesto em [`clusters/dev/flux-system/kustomization.yaml`](file:///home/dexmachina/projetos/Ch-aOS/chaos-cluster/clusters/dev/flux-system/kustomization.yaml):**
-   ```yaml
-   resources:
-     - gotk-components.yaml
-     - gotk-sync.yaml
-     - infra-base.yaml
-     - infra-sec.yaml
-     - infra-apps.yaml # <- Adicione aqui
-   ```
-
-### Adicionando um Novo Ambiente (ex: `clusters/staging/` ou `clusters/prod/`)
-
-1. Duplique a pasta `clusters/dev` para `clusters/prod`.
-2. Ajuste o `.sops.yaml` para as chaves Age/Vault correspondentes ao ambiente de produção.
-3. Configure uma nova instância do Flux apontando para `./clusters/prod/flux-system`.
-
----
-
-## 7. Guia de Bootstrap do Cluster (Do Zero)
-
-Caso precise subir um cluster novo ou recriar o ambiente do zero:
-
-```mermaid
-flowchart TD
-    A[Cluster K8s Novo & Limpo] -->|Passo 0| Z[Gerar Chave Age & Criar .sops.yaml]
-    Z -->|Passo 1| B[flux bootstrap git]
-    B -->|Passo 2| C[Injetar Secret 'sops-age']
-    C -->|Passo 3| D[Flux sobe 'infra-base':\nTraefik, Cert-Manager, OpenBao]
-    D -->|Passo 4 & 5| E[Init & Unseal no OpenBao\n+ Criar Transit Key 'sops-key']
-    E -->|Passo 6| F[Injetar Token OpenBao no Flux:\nSecret 'sops-security' e env]
-    F -->|Passo 7| G[Flux sincroniza 'security' & 'apps'\nCluster 100% Operacional!]
-```
-
-### Passo 0: Gerar a Chave Age e Criar o `.sops.yaml`
-Antes de tudo, você precisa ter uma chave Age gerada na sua máquina e configurar o arquivo `.sops.yaml`:
-
-1. **Gerar o par de chaves Age:**
-   ```bash
-   mkdir -p ~/.config/sops/age
-   age-keygen -pq -o ~/.config/sops/age/keys.txt
-
-   age-keygen -y ~/.config/sops/age/keys.txt
-   ```
-
-2. **Criar o arquivo `clusters/dev/.sops.yaml`:**
-   ```yaml
-   creation_rules:
-   # 1. Bootstrap / Base (Apenas Age)
-   - path_regex: base/.*\.ya?ml
-     encrypted_regex: ^(data|stringData)$
-     key_groups:
-     - age:
-       - "<SUA_CHAVE_PUBLICA_AGE>"
-       - "<SUA_CHAVE_PUBLICA_AGE2>"
-
-   # 2. Segurança e Aplicações (Age + OpenBao Transit)
-   - path_regex: (security|apps)/.*\.ya?ml
-     encrypted_regex: ^(data|stringData)$
-     shamir_threshold: 2
-     key_groups:
-     - age:
-       - "<SUA_CHAVE_PUBLICA_AGE>"
-     - hc_vault:
-       - "http://<IP_DO_SEU_NO>:30200/v1/transit/keys/sops-key"
-     - age:
-       - "<SUA_CHAVE_PUBLICA_AGE2>"
-   ```
-
-### Passo 1: Instalar o Flux CD no Cluster
-Conecte o cluster ao repositório Git:
-```bash
-flux bootstrap git \
-  --url=ssh://git@git:SEU/CLUSTER.git \
-  --branch=main \
-  --path=clusters/dev/flux-system
-```
-
-### Passo 2: Injetar a Chave Age Inicial (Bootstrap Secret)
-O Flux precisa da chave Age para decriptar a camada `base/` (onde estão senhas do Traefik):
-```bash
-cat ~/.config/sops/keys.txt | kubectl create secret generic sops-age \
-  -n flux-system \
-  --from-file=age.agekey=/dev/stdin
-```
-
-### Passo 3: Deixar o Flux subir a Camada Base (`infra-base`)
-O Flux vai reconciliar e subir o **Traefik**, **Cert-Manager** e **OpenBao**:
-```bash
-flux reconcile kustomization infra-base --with-source
-
-# Aguarde o pod do OpenBao e do Traefik ficarem 'Running'
-kubectl get pods -n openbao -w
-```
-
-### Passo 4: Inicializar e Destravar (Unseal) o OpenBao
-Entre no container do OpenBao para inicializar o cofre:
-```bash
-kubectl exec -it openbao-0 -n openbao -- sh
-
-# 1. Inicializar (GUARDE AS 5 UNSEAL KEYS E O ROOT TOKEN!)
-bao operator init
-
-# 2. Destravar o cofre (use 3 chaves diferentes)
-bao operator unseal <UNSEAL_KEY_1>
-bao operator unseal <UNSEAL_KEY_2>
-bao operator unseal <UNSEAL_KEY_3>
-
-# 3. Fazer login com o Root Token
-bao login <INITIAL_ROOT_TOKEN>
-
-# aproveite para copiar essas chaves e o token e guardar de forma encriptada em cluster/dev/base/openbao/unseal-keys.yaml
-```
-
-### Passo 5: Habilitar o Transit Secrets Engine no OpenBao
-Ainda dentro do container do OpenBao:
-```bash
-# 1. Ativar o motor Transit
-bao secrets enable transit
-
-# 2. Criar a chave para o SOPS
-bao write -f transit/keys/sops-key
-
-# 3. Criar a política de permissões
-bao policy write sops - <<EOF
-path "transit/encrypt/*" { capabilities = [ "update" ] }
-path "transit/decrypt/*" { capabilities = [ "update" ] }
-path "transit/keys/*" { capabilities = [ "read" ] }
-EOF
-
-# 4. Gerar o token de longa duração para o Flux/SOPS
-bao token create -policy="sops" -period="8760h"
-
-# 5. Sair do container
-exit
-```
-
-### Passo 6: Injetar as Credenciais do OpenBao no Flux
-Forneça ao `kustomize-controller` o token do OpenBao para decriptar `security/` e `apps/`:
-
-```bash
-# 1. Criar o secret sops-security
-kubectl create secret generic sops-security \
-  -n flux-system \
-  --from-file=age.agekey=~/.config/sops/age/keys.txt \
-  --from-literal=VAULT_TOKEN="<TOKEN_DO_PASSO_5>" \
-  --from-literal=VAULT_ADDR="http://<IP_DO_NO>:30200"
-
-# 2. Injetar as variáveis de ambiente no controller
-kubectl set env deployment/kustomize-controller -n flux-system \
-  VAULT_ADDR="http://<IP_DO_NO>:30200" \
-  VAULT_TOKEN="<TOKEN_DO_PASSO_5>"
-```
-
-### Passo 7: Sincronizar Tudo
-```bash
-flux reconcile kustomization security --with-source
-```
+6. **Operação Contínua:**
+   *(O CronJob de rotação de token `token-rotator` assumirá a autenticação contínua do Flux CD via Kubernetes ServiceAccount Auth).*
 
