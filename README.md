@@ -176,11 +176,33 @@ flowchart LR
 * **Chave Age (Break-Glass / Disaster Recovery):** Mantida offline (cold storage) para decriptação de emergência sem o OpenBao.
 * **OpenBao Transit Engine:** O `kustomize-controller` do Flux obtém tokens de curta duração via ServiceAccount Kubernetes para decriptar os manifestos durante o reconciliamento.
 
+#### Detalhes Arquiteturais do OpenBao (Dev vs. Produção)
+* **Ambiente Atual (Dev / Lab):**
+  * **Modo Standalone:** Roda em réplica única (`standalone: true`) utilizando backend de arquivo (`storage "file"`) persistido em um PVC `ceph-block` de 5Gi.
+  * **Processo de Unseal Manual:** Após reinicializações do pod ou primeiro deploy, o cofre inicia selado e necessita de unseal via CLI (`bao operator unseal`) com quórum Shamir (3 de 5 chaves).
+  * **Persistência de Chaves:** O manifesto `unseal-keys.yaml` é criptografado com SOPS no Git como mecanismo de conveniência para desenvolvimento local.
+  * **Token Rotator:** Um CronJob (`openbao-sops-token-rotator`) a cada 12h autentica via JWT de ServiceAccount (`kustomize-controller`) e atualiza o token de trânsito no Secret `sops-security`.
+* **Adaptação para Produção (Enterprise / HA):**
+  * **Cluster em Alta Disponibilidade (HA Raft):** Migrar para `ha: enabled` com backend integrado Raft (3 a 5 réplicas) para tolerância a falhas de nó sem perda de sessão.
+  * **Auto-Unseal:** Configurar módulo de Auto-Unseal integrado a KMS externo (AWS KMS, Azure Key Vault, HashiCorp Vault Transit externo ou Cloud HSM), dispensando intervenção humana pós-restart.
+  * **Segurança de Chaves:** Remoção completa de arquivos de unseal do repositório Git, distribuindo as chaves Shamir estritamente entre os operadores responsáveis (*key custodians*).
+
+---
+
 ### D. Backup e Disaster Recovery com Velero
 * **Engine:** Velero integrado ao plugin AWS S3 (`velero-plugin-for-aws`).
 * **Destino:** Bucket S3 provisionado dinamicamente pelo Rook-Ceph (`velero-backups`).
 * **Snapshots CSI:** Habilitado via `features: EnableCSI` para tirar snapshots de volumes RBD Ceph.
 * **Rotina:** Backup diário automático às 03:00 AM com retenção configurável de 30 dias.
+
+#### Detalhes Arquiteturais do Velero (Dev vs. Produção)
+* **Ambiente Atual (Dev / Lab):**
+  * **S3 Local via Rook-Ceph (Autossuficiente):** O Velero armazena os metadados e manifestos no bucket `velero-backups` servido pelo próprio gateway RGW interno (`http://rook-ceph-rgw-ceph-s3.rook-ceph.svc:80`).
+  * **Vantagem no Dev:** Totalmente autocontido, sem dependência de internet ou contas em nuvem pública (AWS S3, GCS, Azure Blob), custo zero de egress e provisionamento declarativo via `ObjectBucketClaim`.
+* **Adaptação para Produção (Disaster Recovery Real / Offsite):**
+  * **Risco de Destino Local:** Se o cluster físico ou o pool do Ceph sofrer corrupção irreparável, os backups locais se perdem junto com os dados primários.
+  * **Backup Offsite / Multi-Storage:** Configurar um segundo `BackupStorageLocation` apontando para um bucket S3 externo e geograficamente distante (ex: AWS S3, MinIO em datacenter secundário ou Ceph Multisite).
+  * **Políticas de Replicação:** Habilitar espelhamento de dados (RBD Mirroring / RGW Multisite) para garantir RPO/RTO mínimos em cenários de desastre catastrófico.
 
 ### E. Acesso Seguro, Identidade e Auditoria com Teleport (Out-of-Band)
 * **Zero-Trust Access:** O Teleport gerencia o acesso centralizado e auditado para sessões SSH nos nós bare-metal e conexões autenticadas à API do Kubernetes e via HTTPS, tirando a dependência de VPNs para gerenciar o cluster (`tsh login`, `tsh kube login`).
