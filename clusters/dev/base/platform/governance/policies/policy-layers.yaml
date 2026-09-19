@@ -9,7 +9,7 @@ metadata:
     policies.kyverno.io/description: Impede a criacao de workloads genericos em namespaces reservados de infraestrutura e plataforma.
 spec:
   validationFailureAction: Enforce
-  background: true
+  background: false
   rules:
     - name: restrict-base-namespaces
       match:
