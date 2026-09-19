@@ -39,3 +39,4 @@ spec:
     csi:
       enableRbdDriver: true
       enableCephFSDriver: false
+      provisionerReplicas: 1

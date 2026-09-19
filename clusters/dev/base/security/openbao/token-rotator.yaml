@@ -30,7 +30,7 @@ spec:
                   RESPONSE=$(curl -s -X POST \
                     -H "Content-Type: application/json" \
                     -d "$LOGIN_PAYLOAD" \
-                    http://openbao.openbao.svc.cluster.local:8200/v1/auth/kubernetes/login)
+                    http://openbao-openbao.openbao.svc.cluster.local:8200/v1/auth/kubernetes/login)
 
                   NEW_VAULT_TOKEN=$(echo "$RESPONSE" | grep -o '"client_token":"[^"]*' | cut -d'"' -f4)
 
