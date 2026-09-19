@@ -28,8 +28,14 @@ spec:
   values:
     crds:
       enabled: true
+    resources:
+      requests:
+        cpu: 10m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
     enableRbdDriver: true
-    enableCephFSDriver: true
+    enableCephFSDriver: false
     csi:
       enableRbdDriver: true
-      enableCephFSDriver: true
+      enableCephFSDriver: false
