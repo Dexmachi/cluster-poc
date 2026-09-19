@@ -23,7 +23,7 @@ spec:
       dataStorage:
         enabled: true
         size: 5Gi
-        storageClass: "local-path"
+        storageClass: "ceph-block"
       standalone:
         enabled: true
         config: |
