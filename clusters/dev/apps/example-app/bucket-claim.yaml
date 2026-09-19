@@ -1,0 +1,8 @@
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: app-storage
+  namespace: example-app
+spec:
+  bucketName: example-app-storage
+  storageClassName: ceph-bucket

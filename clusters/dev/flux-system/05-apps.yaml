@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./clusters/dev/security
+  path: ./clusters/dev/apps
   prune: true
   dependsOn:
     - name: 04-security

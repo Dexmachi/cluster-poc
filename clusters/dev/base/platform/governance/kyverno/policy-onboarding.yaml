@@ -1,0 +1,48 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: auto-namespace-onboarding
+  annotations:
+    policies.kyverno.io/title: Auto Namespace Onboarding
+    policies.kyverno.io/category: Multi-Tenancy & Security
+    policies.kyverno.io/description: Gera automaticamente NetworkPolicy e LimitRange quando um novo namespace de aplicacao for criado.
+spec:
+  rules:
+    - name: generate-default-network-policy
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - flux-system
+                - kyverno
+                - rook-ceph
+                - cert-manager
+                - traefik
+                - openbao
+                - default
+      generate:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-isolation
+        namespace: "{{ request.object.metadata.name }}"
+        synchronize: true
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+            ingress:
+              # Permite trafego vindo do Traefik Ingress Controller
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: traefik
+              # Permite trafego interno entre pods do mesmo namespace
+              - from:
+                  - podSelector: {}

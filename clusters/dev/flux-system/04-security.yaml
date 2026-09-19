@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./clusters/dev/base/security/openbao
+  path: ./clusters/dev/base/security
   prune: true
   dependsOn:
     - name: 03-platform

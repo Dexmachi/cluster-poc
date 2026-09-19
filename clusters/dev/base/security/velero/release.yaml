@@ -1,0 +1,72 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: velero
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: velero
+  install:
+    createNamespace: false
+  chart:
+    spec:
+      chart: velero
+      version: ">= 7.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: vmware-tanzu
+        namespace: flux-system
+  values:
+    initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.10.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - mountPath: /plugins
+            name: plugins
+      - name: velero-plugin-for-csi
+        image: velero/velero-plugin-for-csi:v0.7.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - mountPath: /plugins
+            name: plugins
+    configuration:
+      backupStorageLocation:
+        - name: default
+          provider: aws
+          bucket: velero-backups
+          default: true
+          config:
+            region: us-east-1
+            s3ForcePathStyle: "true"
+            s3Url: http://rook-ceph-rgw-ceph-s3.rook-ceph.svc:80
+            insecureSkipTLSVerify: "true"
+      volumeSnapshotLocation:
+        - name: default
+          provider: csi
+      features: EnableCSI
+    credentials:
+      useSecret: true
+      secretContents:
+        cloud: |
+          [default]
+          aws_access_key_id = ceph-s3-admin
+          aws_secret_access_key = ceph-s3-secret
+    resources:
+      requests:
+        cpu: 20m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+    schedules:
+      daily-cluster-backup:
+        schedule: "0 3 * * *" # Backup diario as 03:00 AM
+        template:
+          ttl: "720h" # Retencao de 30 dias
+          includedNamespaces:
+            - "*"
+          excludedNamespaces:
+            - kube-system
+            - flux-system
+            - kyverno
+            - rook-ceph
