@@ -28,3 +28,6 @@ spec:
   values:
     crds:
       enabled: true
+    csi:
+      enableRbdDriver: true
+      enableCephFSDriver: true
