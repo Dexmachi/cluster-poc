@@ -1,14 +1,14 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: 02-storage
+  name: 02-storage-cluster
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./clusters/dev/base/storage/rook-ceph
+  path: ./clusters/dev/base/storage/rook-ceph-cluster
   prune: true
   dependsOn:
-    - name: 01-governance
+    - name: 02-storage-operator
   sourceRef:
     kind: GitRepository
     name: flux-system
