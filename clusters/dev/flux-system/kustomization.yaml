@@ -4,6 +4,7 @@ resources:
   - gotk-components.yaml
   - gotk-sync.yaml
   - 01-governance.yaml
+  - 01-governance-policies.yaml
   - 02-storage-operator.yaml
   - 02-storage-cluster.yaml
   - 03-platform.yaml

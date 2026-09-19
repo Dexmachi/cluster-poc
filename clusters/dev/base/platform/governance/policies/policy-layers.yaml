@@ -1,0 +1,46 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-semantic-layers
+  annotations:
+    policies.kyverno.io/title: Enforce Semantic Layers
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: Impede a criacao de workloads genericos em namespaces reservados de infraestrutura e plataforma.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: restrict-base-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+                - StatefulSet
+                - DaemonSet
+              namespaces:
+                - kube-system
+                - flux-system
+                - kyverno
+                - rook-ceph
+                - cert-manager
+                - traefik
+                - openbao
+      exclude:
+        any:
+          - subjects:
+              - kind: ServiceAccount
+                name: helm-controller
+                namespace: flux-system
+              - kind: ServiceAccount
+                name: kustomize-controller
+                namespace: flux-system
+      validate:
+        message: "Operacao bloqueada: Nao e permitido criar workloads manuais em namespaces de infraestrutura de base."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.userInfo.username }}"
+                operator: NotEquals
+                value: "system:serviceaccount:flux-system:helm-controller"
